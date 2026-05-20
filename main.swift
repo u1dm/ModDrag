@@ -8,7 +8,7 @@ import IOKit.hid
 private let axFrameAttribute: CFString = "AXFrame" as CFString
 private let inputRunLoopMode = CFRunLoopMode.commonModes.rawValue
 private let trackedModifierFlags: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
-private let modDragVersion = "0.1.1"
+private let modDragVersion = "0.1.2"
 
 private func normalizedModifierFlags(_ flags: CGEventFlags) -> CGEventFlags {
     flags.intersection(trackedModifierFlags)
@@ -87,6 +87,8 @@ enum ShortcutAction: String {
     case resize
     case zoom
 
+    static let allCases: [ShortcutAction] = [.move, .resize, .zoom]
+
     var title: String {
         switch self {
         case .move: return "Move"
@@ -121,6 +123,9 @@ struct ModifierPreset: CaseIterable, Equatable {
 final class ModDragSettings {
     private enum Key {
         static let sideButtonNumber = "sideButtonNumber"
+        static let moveButtonNumber = "moveButtonNumber"
+        static let resizeButtonNumber = "resizeButtonNumber"
+        static let zoomButtonNumber = "zoomButtonNumber"
         static let dragModifierPreset = "dragModifierPreset"
         static let resizeModifierPreset = "resizeModifierPreset"
         static let dragModifierFlags = "dragModifierFlags"
@@ -142,6 +147,27 @@ final class ModDragSettings {
     var sideButtonNumber: Int64 {
         didSet {
             defaults.set(sideButtonNumber, forKey: Key.sideButtonNumber)
+            onChange?()
+        }
+    }
+
+    var moveButtonNumber: Int64 {
+        didSet {
+            defaults.set(moveButtonNumber, forKey: Key.moveButtonNumber)
+            onChange?()
+        }
+    }
+
+    var resizeButtonNumber: Int64 {
+        didSet {
+            defaults.set(resizeButtonNumber, forKey: Key.resizeButtonNumber)
+            onChange?()
+        }
+    }
+
+    var zoomButtonNumber: Int64 {
+        didSet {
+            defaults.set(zoomButtonNumber, forKey: Key.zoomButtonNumber)
             onChange?()
         }
     }
@@ -196,6 +222,10 @@ final class ModDragSettings {
     init() {
         let savedButtonNumber = defaults.object(forKey: Key.sideButtonNumber) as? NSNumber
         sideButtonNumber = savedButtonNumber?.int64Value ?? 3
+        let legacyButtonNumber = sideButtonNumber
+        moveButtonNumber = (defaults.object(forKey: Key.moveButtonNumber) as? NSNumber)?.int64Value ?? legacyButtonNumber
+        resizeButtonNumber = (defaults.object(forKey: Key.resizeButtonNumber) as? NSNumber)?.int64Value ?? legacyButtonNumber
+        zoomButtonNumber = (defaults.object(forKey: Key.zoomButtonNumber) as? NSNumber)?.int64Value ?? legacyButtonNumber
 
         dragModifierFlags = Self.loadModifierFlags(
             defaults: defaults,
@@ -231,6 +261,9 @@ final class ModDragSettings {
 
     func resetToDefaults() {
         sideButtonNumber = 3
+        moveButtonNumber = 3
+        resizeButtonNumber = 3
+        zoomButtonNumber = 3
         dragModifierFlags = ModifierPreset.command.flags
         resizeModifierFlags = ModifierPreset.controlCommand.flags
         zoomModifierFlags = ModifierPreset.command.flags
@@ -258,6 +291,14 @@ final class ModDragSettings {
         }
     }
 
+    func buttonNumber(for action: ShortcutAction) -> Int64 {
+        switch action {
+        case .move: return moveButtonNumber
+        case .resize: return resizeButtonNumber
+        case .zoom: return zoomButtonNumber
+        }
+    }
+
     func setFlags(_ flags: CGEventFlags, for action: ShortcutAction) {
         let normalizedFlags = normalizedModifierFlags(flags)
         switch action {
@@ -278,6 +319,17 @@ final class ModDragSettings {
             resizeKeyCode = keyCode
         case .zoom:
             zoomKeyCode = keyCode
+        }
+    }
+
+    func setButtonNumber(_ buttonNumber: Int64, for action: ShortcutAction) {
+        switch action {
+        case .move:
+            moveButtonNumber = buttonNumber
+        case .resize:
+            resizeButtonNumber = buttonNumber
+        case .zoom:
+            zoomButtonNumber = buttonNumber
         }
     }
 
@@ -641,7 +693,9 @@ final class StatusBarController: NSObject {
         menu.addItem(makeRecordItem(.zoom))
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(makeSideButtonMenu())
+        menu.addItem(makeSideButtonMenu(title: "Move Button", action: .move))
+        menu.addItem(makeSideButtonMenu(title: "Resize Button", action: .resize))
+        menu.addItem(makeSideButtonMenu(title: "Maximize Button", action: .zoom))
         menu.addItem(makeModifierMenu(title: "Move Modifier", symbolName: "move.3d", action: #selector(setMoveModifier(_:)), selectedFlags: settings.dragModifierFlags))
         menu.addItem(makeModifierMenu(title: "Resize Modifier", symbolName: "arrow.up.left.and.arrow.down.right", action: #selector(setResizeModifier(_:)), selectedFlags: settings.resizeModifierFlags))
         menu.addItem(makeModifierMenu(title: "Maximize Modifier", symbolName: "arrow.up.left.and.arrow.down.right.magnifyingglass", action: #selector(setZoomModifier(_:)), selectedFlags: settings.zoomModifierFlags))
@@ -674,7 +728,7 @@ final class StatusBarController: NSObject {
         if let keyCode = settings.keyCode(for: action) {
             parts.append(keyName(for: keyCode))
         }
-        parts.append("Button \(settings.sideButtonNumber)")
+        parts.append("Button \(settings.buttonNumber(for: action))")
         return parts.joined(separator: " + ")
     }
 
@@ -692,15 +746,15 @@ final class StatusBarController: NSObject {
         return item
     }
 
-    private func makeSideButtonMenu() -> NSMenuItem {
-        let item = makeParentItem("Side Button", symbolName: "button.horizontal")
+    private func makeSideButtonMenu(title: String, action: ShortcutAction) -> NSMenuItem {
+        let item = makeParentItem(title, symbolName: "button.horizontal")
         let submenu = NSMenu()
 
         for buttonNumber in [3, 4, 5, 6, 7] {
             let buttonItem = makeActionItem("Button \(buttonNumber)", symbolName: buttonNumber == 3 ? "checkmark.circle" : "circle", action: #selector(setSideButton(_:)))
             buttonItem.target = self
-            buttonItem.representedObject = buttonNumber
-            buttonItem.state = settings.sideButtonNumber == Int64(buttonNumber) ? .on : .off
+            buttonItem.representedObject = "\(action.rawValue):\(buttonNumber)"
+            buttonItem.state = settings.buttonNumber(for: action) == Int64(buttonNumber) ? .on : .off
             submenu.addItem(buttonItem)
         }
 
@@ -785,9 +839,14 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func setSideButton(_ sender: NSMenuItem) {
-        guard let buttonNumber = sender.representedObject as? Int else { return }
-        settings.sideButtonNumber = Int64(buttonNumber)
-        rebuildMenu()
+        guard let value = sender.representedObject as? String else { return }
+        let parts = value.split(separator: ":")
+        guard parts.count == 2,
+              let action = ShortcutAction(rawValue: String(parts[0])),
+              let buttonNumber = Int64(parts[1]) else {
+            return
+        }
+        settings.setButtonNumber(buttonNumber, for: action)
     }
 
     @objc private func setMoveModifier(_ sender: NSMenuItem) {
@@ -881,19 +940,20 @@ class WindowDragger {
     private var optionActive = false
     private var shiftActive = false
     private var pressedKeyCodes: Set<UInt16> = []
+    private var activeButtonNumber: Int64?
     private var lastShortcutTapTime: CFAbsoluteTime = 0
     private var savedWindowFrames: [CFHashCode: CGRect] = [:]
 
     private var dragShortcutActive: Bool {
-        customKeyActive && modifiersMatch(settings.dragModifierFlags) && keyMatches(settings.dragKeyCode)
+        shortcutActive(.move)
     }
 
     private var resizeShortcutActive: Bool {
-        customKeyActive && modifiersMatch(settings.resizeModifierFlags) && keyMatches(settings.resizeKeyCode)
+        shortcutActive(.resize)
     }
 
     private var zoomShortcutActive: Bool {
-        customKeyActive && modifiersMatch(settings.zoomModifierFlags) && keyMatches(settings.zoomKeyCode)
+        shortcutActive(.zoom)
     }
 
     init(configuration: WindowDraggerConfiguration = .default, settings: ModDragSettings) {
@@ -1125,6 +1185,13 @@ class WindowDragger {
         return pressedKeyCodes.contains(expectedKeyCode)
     }
 
+    private func shortcutActive(_ action: ShortcutAction) -> Bool {
+        customKeyActive &&
+            activeButtonNumber == settings.buttonNumber(for: action) &&
+            modifiersMatch(settings.flags(for: action)) &&
+            keyMatches(settings.keyCode(for: action))
+    }
+
     private func shortcutLogDescription(_ action: ShortcutAction) -> String {
         var parts: [String] = []
         let modifiers = modifierTitle(settings.flags(for: action))
@@ -1134,7 +1201,7 @@ class WindowDragger {
         if let keyCode = settings.keyCode(for: action) {
             parts.append(keyName(for: keyCode))
         }
-        parts.append("Button \(settings.sideButtonNumber)")
+        parts.append("Button \(settings.buttonNumber(for: action))")
         return parts.joined(separator: " + ")
     }
 
@@ -1145,7 +1212,7 @@ class WindowDragger {
         refreshModifierState(from: event.flags)
 
         if type == .otherMouseDown, let recordingAction = settings.recordingAction {
-            settings.sideButtonNumber = buttonNumber
+            settings.setButtonNumber(buttonNumber, for: recordingAction)
             settings.setFlags(event.flags, for: recordingAction)
             settings.setKeyCode(pressedKeyCodes.sorted().first, for: recordingAction)
             settings.recordingAction = nil
@@ -1153,11 +1220,20 @@ class WindowDragger {
             return nil
         }
 
-        guard buttonNumber == settings.sideButtonNumber else {
+        let isConfiguredButton = ShortcutAction.allCases.contains { settings.buttonNumber(for: $0) == buttonNumber }
+        guard isConfiguredButton else {
             return Unmanaged.passUnretained(event)
         }
 
-        customKeyActive = type == .otherMouseDown
+        if type == .otherMouseDown {
+            activeButtonNumber = buttonNumber
+            customKeyActive = true
+        } else if activeButtonNumber == buttonNumber {
+            customKeyActive = false
+            activeButtonNumber = nil
+        } else {
+            return Unmanaged.passUnretained(event)
+        }
         pendingMouseLocation = event.location
 
         if type == .otherMouseDown, zoomShortcutActive {
@@ -1184,6 +1260,7 @@ class WindowDragger {
         }
 
         customKeyActive = isPressed
+        activeButtonNumber = isPressed ? settings.buttonNumber(for: .move) : nil
         handleShortcutStateChanged()
     }
 
