@@ -967,7 +967,7 @@ class WindowDragger {
     func start() {
         // Check accessibility permissions
         guard checkAccessibilityPermissions() else {
-            exit(1)
+            return
         }
         
         // Create event tap
