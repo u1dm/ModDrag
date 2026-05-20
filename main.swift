@@ -8,6 +8,7 @@ import IOKit.hid
 private let axFrameAttribute: CFString = "AXFrame" as CFString
 private let inputRunLoopMode = CFRunLoopMode.commonModes.rawValue
 private let trackedModifierFlags: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+private let modDragVersion = "0.1.1"
 
 private func normalizedModifierFlags(_ flags: CGEventFlags) -> CGEventFlags {
     flags.intersection(trackedModifierFlags)
@@ -1736,6 +1737,21 @@ class WindowDragger {
 struct Main {
     static func main() {
         Log.configure(isEnabled: CommandLine.arguments.contains("--log"))
+
+        if CommandLine.arguments.contains("--version") {
+            print("mod-drag \(modDragVersion)")
+            return
+        }
+
+        if CommandLine.arguments.contains("--help") {
+            print("""
+            Usage: mod-drag [--log] [--version] [--help]
+
+            ModDrag runs as a macOS menu bar app. Grant Accessibility access,
+            then use the menu bar icon to configure side-button shortcuts.
+            """)
+            return
+        }
 
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
